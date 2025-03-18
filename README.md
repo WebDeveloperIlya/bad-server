@@ -1,3 +1,5 @@
+https://github.com/WebDeveloperIlya/bad-server
+
 # Проектная работа "WebLarek. Плохой сервер.", спринт 17
 
 ## Подготовка к работе
