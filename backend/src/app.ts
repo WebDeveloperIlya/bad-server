@@ -5,31 +5,43 @@ import 'dotenv/config'
 import express, { json, urlencoded } from 'express'
 import mongoose from 'mongoose'
 import path from 'path'
-import { DB_ADDRESS } from './config'
+import rateLimit from 'express-rate-limit'
+import mongoSanitize from 'express-mongo-sanitize'
+
+import { DB_ADDRESS, ORIGIN_ALLOW, PORT } from './config'
 import errorHandler from './middlewares/error-handler'
 import serveStatic from './middlewares/serverStatic'
 import routes from './routes'
 
-const { PORT = 3000 } = process.env
 const app = express()
+app.use(
+    rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: 60,
+        message: 'Достигнут лимит запросов, попробуйте зайти позже ',
+        legacyHeaders: false,
+    })
+)
 
 app.use(cookieParser())
 
-app.use(cors())
-// app.use(cors({ origin: ORIGIN_ALLOW, credentials: true }));
-// app.use(express.static(path.join(__dirname, 'public')));
+app.use(
+    cors({
+        origin: ORIGIN_ALLOW,
+        credentials: true,
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    })
+)
 
 app.use(serveStatic(path.join(__dirname, 'public')))
 
 app.use(urlencoded({ extended: true }))
 app.use(json())
-
+app.use(mongoSanitize())
 app.options('*', cors())
 app.use(routes)
 app.use(errors())
 app.use(errorHandler)
-
-// eslint-disable-next-line no-console
 
 const bootstrap = async () => {
     try {

@@ -10,78 +10,59 @@ import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import User from '../models/user'
 
-import bcrypt from 'bcryptjs'
-import { validationResult } from 'express-validator'
-import xss from 'xss'
-
 // POST /auth/login
-const AUTH_ACCESS_TOKEN_EXPIRY =
-    process.env.AUTH_ACCESS_TOKEN_EXPIRY || 'your_secret'
-const AUTH_REFRESH_TOKEN_EXPIRY =
-    process.env.AUTH_REFRESH_TOKEN_EXPIRY || 'your_secret'
-
-const register = async (req: Request, res: Response) => {
-    const errors = validationResult(req)
-    if (!errors.isEmpty())
-        return res.status(400).json({ errors: errors.array() })
-
-    const { email, password, name } = req.body
+const login = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const existingUser = await User.findOne({ email })
-        if (existingUser)
-            return res
-                .status(400)
-                .json({ message: 'Email уже зарегистрирован' })
-
-        const hashedPassword = await bcrypt.hash(password, 10)
-        const newUser = new User({ email, password: hashedPassword, name })
-        await newUser.save()
-
-        res.status(201).json({
+        const { email, password } = req.body
+        const user = await User.findUserByCredentials(email, password)
+        const accessToken = user.generateAccessToken()
+        const refreshToken = await user.generateRefreshToken()
+        res.cookie(
+            REFRESH_TOKEN.cookie.name,
+            refreshToken,
+            REFRESH_TOKEN.cookie.options
+        )
+        res.cookie('csrfToken', crypto.randomBytes(32).toString('hex'))
+        return res.json({
             success: true,
-            user: {
-                _id: newUser._id,
-                email: newUser.email,
-                name: xss(newUser.name),
-            },
+            user,
+            accessToken,
         })
-    } catch (error) {
-        res.status(500).json({ message: 'Ошибка сервера' })
+    } catch (err) {
+        return next(err)
     }
 }
 
-const login = async (req: Request, res: Response) => {
-    const errors = validationResult(req)
-    if (!errors.isEmpty())
-        return res.status(400).json({ errors: errors.array() })
-
-    const { email, password } = req.body
+// POST /auth/register
+const register = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const user = await User.findOne({ email })
-        if (!user)
-            return res.status(400).json({ message: 'Неверные учетные данные' })
+        const { email, password, name } = req.body
+        const newUser = new User({ email, password, name })
+        await newUser.save()
+        const accessToken = newUser.generateAccessToken()
+        const refreshToken = await newUser.generateRefreshToken()
 
-        const isPasswordValid = await bcrypt.compare(password, user.password)
-        if (!isPasswordValid)
-            return res.status(400).json({ message: 'Неверные учетные данные' })
-
-        const accessToken = jwt.sign(
-            { userId: user._id },
-            AUTH_ACCESS_TOKEN_EXPIRY,
-            { expiresIn: '1h' }
+        res.cookie(
+            REFRESH_TOKEN.cookie.name,
+            refreshToken,
+            REFRESH_TOKEN.cookie.options
         )
-
-        res.json({
+        res.cookie('csrfToken', crypto.randomBytes(32).toString('hex'))
+        return res.status(constants.HTTP_STATUS_CREATED).json({
             success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: xss(user.name),
-            },
+            user: newUser,
             accessToken,
         })
     } catch (error) {
-        res.status(500).json({ message: 'Ошибка сервера' })
+        if (error instanceof MongooseError.ValidationError) {
+            return next(new BadRequestError(error.message))
+        }
+        if (error instanceof Error && error.message.includes('E11000')) {
+            return next(
+                new ConflictError('Пользователь с таким email уже существует')
+            )
+        }
+        return next(error)
     }
 }
 
