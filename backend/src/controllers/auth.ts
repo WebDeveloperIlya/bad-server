@@ -10,57 +10,76 @@ import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import User from '../models/user'
 
+import bcrypt from 'bcryptjs'
+import { validationResult } from 'express-validator'
+import xss from 'xss'
+
 // POST /auth/login
-const login = async (req: Request, res: Response, next: NextFunction) => {
+const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'your_secret'
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your_secret'
+
+const register = async (req: Request, res: Response) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() })
+
+    const { email, password, name } = req.body
     try {
-        const { email, password } = req.body
-        const user = await User.findUserByCredentials(email, password)
-        const accessToken = user.generateAccessToken()
-        const refreshToken = await user.generateRefreshToken()
-        res.cookie(
-            REFRESH_TOKEN.cookie.name,
-            refreshToken,
-            REFRESH_TOKEN.cookie.options
-        )
-        return res.json({
+        const existingUser = await User.findOne({ email })
+        if (existingUser)
+            return res
+                .status(400)
+                .json({ message: 'Email уже зарегистрирован' })
+
+        const hashedPassword = await bcrypt.hash(password, 10)
+        const newUser = new User({ email, password: hashedPassword, name })
+        await newUser.save()
+
+        res.status(201).json({
             success: true,
-            user,
-            accessToken,
+            user: {
+                _id: newUser._id,
+                email: newUser.email,
+                name: xss(newUser.name),
+            },
         })
-    } catch (err) {
-        return next(err)
+    } catch (error) {
+        res.status(500).json({ message: 'Ошибка сервера' })
     }
 }
 
-// POST /auth/register
-const register = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const { email, password, name } = req.body
-        const newUser = new User({ email, password, name })
-        await newUser.save()
-        const accessToken = newUser.generateAccessToken()
-        const refreshToken = await newUser.generateRefreshToken()
+const login = async (req: Request, res: Response) => {
+    const errors = validationResult(req)
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() })
 
-        res.cookie(
-            REFRESH_TOKEN.cookie.name,
-            refreshToken,
-            REFRESH_TOKEN.cookie.options
+    const { email, password } = req.body
+    try {
+        const user = await User.findOne({ email })
+        if (!user)
+            return res.status(400).json({ message: 'Неверные учетные данные' })
+
+        const isPasswordValid = await bcrypt.compare(password, user.password)
+        if (!isPasswordValid)
+            return res.status(400).json({ message: 'Неверные учетные данные' })
+
+        const accessToken = jwt.sign(
+            { userId: user._id },
+            ACCESS_TOKEN_SECRET,
+            { expiresIn: '1h' }
         )
-        return res.status(constants.HTTP_STATUS_CREATED).json({
+
+        res.json({
             success: true,
-            user: newUser,
+            user: {
+                _id: user._id,
+                email: user.email,
+                name: xss(user.name),
+            },
             accessToken,
         })
     } catch (error) {
-        if (error instanceof MongooseError.ValidationError) {
-            return next(new BadRequestError(error.message))
-        }
-        if (error instanceof Error && error.message.includes('E11000')) {
-            return next(
-                new ConflictError('Пользователь с таким email уже существует')
-            )
-        }
-        return next(error)
+        res.status(500).json({ message: 'Ошибка сервера' })
     }
 }
 
