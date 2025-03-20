@@ -15,8 +15,10 @@ import { validationResult } from 'express-validator'
 import xss from 'xss'
 
 // POST /auth/login
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'your_secret'
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'your_secret'
+const AUTH_ACCESS_TOKEN_EXPIRY =
+    process.env.AUTH_ACCESS_TOKEN_EXPIRY || 'your_secret'
+const AUTH_REFRESH_TOKEN_EXPIRY =
+    process.env.AUTH_REFRESH_TOKEN_EXPIRY || 'your_secret'
 
 const register = async (req: Request, res: Response) => {
     const errors = validationResult(req)
@@ -65,7 +67,7 @@ const login = async (req: Request, res: Response) => {
 
         const accessToken = jwt.sign(
             { userId: user._id },
-            ACCESS_TOKEN_SECRET,
+            AUTH_ACCESS_TOKEN_EXPIRY,
             { expiresIn: '1h' }
         )
 
